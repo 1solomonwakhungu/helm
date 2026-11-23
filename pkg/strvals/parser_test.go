@@ -714,28 +714,63 @@ func TestParseSetNestedLevels(t *testing.T) {
 		}
 		keyMultipleNestedLevels.WriteString(tmpStr)
 	}
+	maxErr := fmt.Sprintf("value name nested level is greater than maximum supported nested level of %d",
+		MaxNestedNameLevel)
+
+	nestedArrayAtMax := "a" + strings.Repeat("[0]", MaxNestedNameLevel) + "=1"
+	nestedArrayOverMax := "a" + strings.Repeat("[0]", MaxNestedNameLevel+1) + "=1"
+	mixedAtMax := "a" + strings.Repeat("[0].a", MaxNestedNameLevel/2) + "=1"
+	mixedOverMaxList := "a" + strings.Repeat("[0].a", MaxNestedNameLevel/2) + "[0]=1"
+	mixedOverMaxDot := "a" + strings.Repeat(".a", MaxNestedNameLevel-1) + "[0].b=1"
+
 	tests := []struct {
+		name   string
 		str    string
 		expect map[string]any
 		err    bool
 		errStr string
 	}{
 		{
-			"outer.middle.inner=value",
-			map[string]any{"outer": map[string]any{"middle": map[string]any{"inner": "value"}}},
-			false,
-			"",
+			name:   "simple nested maps",
+			str:    "outer.middle.inner=value",
+			expect: map[string]any{"outer": map[string]any{"middle": map[string]any{"inner": "value"}}},
 		},
 		{
-			str: keyMultipleNestedLevels.String() + "=value",
-			err: true,
-			errStr: fmt.Sprintf("value name nested level is greater than maximum supported nested level of %d",
-				MaxNestedNameLevel),
+			name:   "nested maps over limit",
+			str:    keyMultipleNestedLevels.String() + "=value",
+			err:    true,
+			errStr: maxErr,
+		},
+		{
+			name: "nested arrays at limit",
+			str:  nestedArrayAtMax,
+		},
+		{
+			name:   "nested arrays over limit",
+			str:    nestedArrayOverMax,
+			err:    true,
+			errStr: maxErr,
+		},
+		{
+			name: "mixed map and array nesting at limit",
+			str:  mixedAtMax,
+		},
+		{
+			name:   "mixed map and array nesting over limit at list index",
+			str:    mixedOverMaxList,
+			err:    true,
+			errStr: maxErr,
+		},
+		{
+			name:   "mixed map and array nesting over limit after list index",
+			str:    mixedOverMaxDot,
+			err:    true,
+			errStr: maxErr,
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.str, func(t *testing.T) {
+		t.Run("Parse/"+tt.name, func(t *testing.T) {
 			got, err := Parse(tt.str)
 			if tt.err {
 				require.Error(t, err)
@@ -744,13 +779,30 @@ func TestParseSetNestedLevels(t *testing.T) {
 				}
 			} else {
 				require.NoError(t, err)
+				if tt.expect != nil {
+					y1, err := yaml.Marshal(tt.expect)
+					require.NoError(t, err)
 
-				y1, err := yaml.Marshal(tt.expect)
+					y2, err := yaml.Marshal(got)
+					require.NoError(t, err, "Error serializing parsed value")
+					assert.YAMLEq(t, string(y1), string(y2), tt.str)
+				}
+			}
+		})
+
+		t.Run("ParseJSON/"+tt.name, func(t *testing.T) {
+			if tt.expect != nil {
+				return
+			}
+			got := map[string]any{}
+			err := ParseJSON(tt.str, got)
+			if tt.err {
+				require.Error(t, err)
+				if tt.errStr != "" {
+					require.EqualError(t, err, tt.errStr)
+				}
+			} else {
 				require.NoError(t, err)
-
-				y2, err := yaml.Marshal(got)
-				require.NoError(t, err, "Error serializing parsed value")
-				assert.YAMLEq(t, string(y1), string(y2), tt.str)
 			}
 		})
 	}

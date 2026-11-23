@@ -411,27 +411,56 @@ func TestParseLiteralNestedLevels(t *testing.T) {
 		keyMultipleNestedLevels.WriteString(tmpStr)
 	}
 
+	maxErr := fmt.Sprintf("value name nested level is greater than maximum supported nested level of %d", MaxNestedNameLevel)
+
 	tests := []struct {
+		name   string
 		str    string
 		expect map[string]any
 		err    bool
 		errStr string
 	}{
 		{
-			"outer.middle.inner=value",
-			map[string]any{"outer": map[string]any{"middle": map[string]any{"inner": "value"}}},
-			false,
-			"",
+			name:   "simple nested maps",
+			str:    "outer.middle.inner=value",
+			expect: map[string]any{"outer": map[string]any{"middle": map[string]any{"inner": "value"}}},
 		},
 		{
+			name:   "nested maps over limit",
 			str:    keyMultipleNestedLevels.String() + "=value",
 			err:    true,
-			errStr: fmt.Sprintf("value name nested level is greater than maximum supported nested level of %d", MaxNestedNameLevel),
+			errStr: maxErr,
+		},
+		{
+			name: "nested arrays at limit",
+			str:  "a" + strings.Repeat("[0]", MaxNestedNameLevel) + "=1",
+		},
+		{
+			name:   "nested arrays over limit",
+			str:    "a" + strings.Repeat("[0]", MaxNestedNameLevel+1) + "=1",
+			err:    true,
+			errStr: maxErr,
+		},
+		{
+			name: "mixed map and array nesting at limit",
+			str:  "a" + strings.Repeat("[0].a", MaxNestedNameLevel/2) + "=1",
+		},
+		{
+			name:   "mixed map and array nesting over limit at list index",
+			str:    "a" + strings.Repeat("[0].a", MaxNestedNameLevel/2) + "[0]=1",
+			err:    true,
+			errStr: maxErr,
+		},
+		{
+			name:   "mixed map and array nesting over limit after list index",
+			str:    "a" + strings.Repeat(".a", MaxNestedNameLevel-1) + "[0].b=1",
+			err:    true,
+			errStr: maxErr,
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.str, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseLiteral(tt.str)
 			if tt.err {
 				require.Error(t, err)
@@ -440,13 +469,15 @@ func TestParseLiteralNestedLevels(t *testing.T) {
 				}
 			} else {
 				require.NoError(t, err)
-				y1, err := yaml.Marshal(tt.expect)
-				require.NoError(t, err)
+				if tt.expect != nil {
+					y1, err := yaml.Marshal(tt.expect)
+					require.NoError(t, err)
 
-				y2, err := yaml.Marshal(got)
-				require.NoError(t, err, "Error serializing parsed value")
+					y2, err := yaml.Marshal(got)
+					require.NoError(t, err, "Error serializing parsed value")
 
-				assert.YAMLEq(t, string(y1), string(y2), tt.str)
+					assert.YAMLEq(t, string(y1), string(y2), tt.str)
+				}
 			}
 		})
 	}

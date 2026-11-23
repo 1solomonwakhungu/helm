@@ -136,6 +136,12 @@ func (t *literalParser) key(data map[string]any, nestedNameLevel int) (reterr er
 			return err
 
 		case lastRune == '[':
+			// Check value name is within the maximum nested name level
+			nestedNameLevel++
+			if nestedNameLevel > MaxNestedNameLevel {
+				return fmt.Errorf("value name nested level is greater than maximum supported nested level of %d", MaxNestedNameLevel)
+			}
+
 			// We are in a list index context, so we need to set an index.
 			i, err := t.keyIndex()
 			if err != nil {
@@ -190,6 +196,12 @@ func (t *literalParser) listItem(list []any, i, nestedNameLevel int) ([]any, err
 		return setIndex(list, i, string(value))
 
 	case lastRune == '.':
+		// Check value name is within the maximum nested name level
+		nestedNameLevel++
+		if nestedNameLevel > MaxNestedNameLevel {
+			return list, fmt.Errorf("value name nested level is greater than maximum supported nested level of %d", MaxNestedNameLevel)
+		}
+
 		// we have a nested object. Send to t.key
 		inner := map[string]any{}
 		if len(list) > i {
@@ -210,6 +222,12 @@ func (t *literalParser) listItem(list []any, i, nestedNameLevel int) ([]any, err
 		return setIndex(list, i, inner)
 
 	case lastRune == '[':
+		// Check value name is within the maximum nested name level
+		nestedNameLevel++
+		if nestedNameLevel > MaxNestedNameLevel {
+			return list, fmt.Errorf("value name nested level is greater than maximum supported nested level of %d", MaxNestedNameLevel)
+		}
+
 		// now we have a nested list. Read the index and handle.
 		nextI, err := t.keyIndex()
 		if err != nil {
