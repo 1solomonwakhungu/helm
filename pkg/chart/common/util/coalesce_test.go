@@ -825,3 +825,116 @@ func TestCoalesceValuesSubchartNilCleanedWhenUserPartiallyOverrides(t *testing.T
 	_, ok = keyMapping["password"]
 	is.False(ok, "Expected keyMapping.password (nil from chart defaults) to be removed even when user partially overrides the map")
 }
+
+// TestCoalesceGlobalsNestedMapIsolation verifies that nested maps under global
+// are deep-copied per subchart so sibling subcharts cannot mutate the parent's
+// or each other's nested global tables.
+func TestCoalesceGlobalsNestedMapIsolation(t *testing.T) {
+	newChart := func() *chart.Chart {
+		sub1 := &chart.Chart{
+			Metadata: &chart.Metadata{Name: "sub1"},
+			Values: map[string]any{
+				"global": map[string]any{
+					"nested": map[string]any{
+						"inner": map[string]any{
+							"fromParent": "sub1-override",
+							"fromSub1":   "sub1",
+							"deep":       map[string]any{"onlySub1": true},
+						},
+					},
+				},
+			},
+		}
+		sub2 := &chart.Chart{
+			Metadata: &chart.Metadata{Name: "sub2"},
+			Values: map[string]any{
+				"global": map[string]any{
+					"nested": map[string]any{
+						"inner": map[string]any{
+							"fromSub2": "sub2",
+						},
+					},
+				},
+			},
+		}
+		return withDeps(&chart.Chart{
+			Metadata: &chart.Metadata{Name: "parent"},
+			Values: map[string]any{
+				"global": map[string]any{
+					"nested": map[string]any{
+						"inner": map[string]any{
+							"fromParent": "parent",
+						},
+					},
+				},
+			},
+		}, sub1, sub2)
+	}
+
+	userVals := func() map[string]any {
+		return map[string]any{
+			"global": map[string]any{
+				"nested": map[string]any{
+					"inner": map[string]any{
+						"fromUser": "user",
+					},
+				},
+			},
+		}
+	}
+
+	extractInner := func(t *testing.T, root map[string]any, subchart string) map[string]any {
+		t.Helper()
+		m := root
+		if subchart != "" {
+			var ok bool
+			m, ok = root[subchart].(map[string]any)
+			require.True(t, ok, "missing subchart %q", subchart)
+		}
+		g, ok := m["global"].(map[string]any)
+		require.True(t, ok, "missing global map")
+		nested, ok := g["nested"].(map[string]any)
+		require.True(t, ok, "missing global.nested map")
+		inner, ok := nested["inner"].(map[string]any)
+		require.True(t, ok, "missing global.nested.inner map")
+		return inner
+	}
+
+	for _, tc := range []struct {
+		name string
+		fn   func(*chart.Chart, map[string]any) (common.Values, error)
+	}{
+		{name: "CoalesceValues", fn: func(c *chart.Chart, vals map[string]any) (common.Values, error) {
+			return CoalesceValues(c, vals)
+		}},
+		{name: "MergeValues", fn: func(c *chart.Chart, vals map[string]any) (common.Values, error) {
+			return MergeValues(c, vals)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := tc.fn(newChart(), userVals())
+			require.NoError(t, err)
+
+			parentInner := extractInner(t, v, "")
+			assert.Equal(t, map[string]any{
+				"fromUser":   "user",
+				"fromParent": "parent",
+			}, parentInner)
+
+			sub1Inner := extractInner(t, v, "sub1")
+			assert.Equal(t, map[string]any{
+				"fromUser":   "user",
+				"fromParent": "parent",
+				"fromSub1":   "sub1",
+				"deep":       map[string]any{"onlySub1": true},
+			}, sub1Inner)
+
+			sub2Inner := extractInner(t, v, "sub2")
+			assert.Equal(t, map[string]any{
+				"fromUser":   "user",
+				"fromParent": "parent",
+				"fromSub2":   "sub2",
+			}, sub2Inner)
+		})
+	}
+}

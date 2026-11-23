@@ -160,7 +160,7 @@ func coalesceGlobals(printf printFn, dest, src map[string]any, prefix string, _ 
 	// tables in globals.
 	for key, val := range sg {
 		if istable(val) {
-			vv := copyMap(val.(map[string]any))
+			vv := copyMap(printf, val.(map[string]any))
 			if destv, ok := dg[key]; !ok {
 				// Here there is no merge. We're just adding.
 				dg[key] = vv
@@ -189,7 +189,21 @@ func coalesceGlobals(printf printFn, dest, src map[string]any, prefix string, _ 
 	dest[common.GlobalKey] = dg
 }
 
-func copyMap(src map[string]any) map[string]any {
+func copyMap(printf printFn, src map[string]any) map[string]any {
+	copied, err := copystructure.Copy(src)
+	if err != nil {
+		printf("warning: unable to copy globals map, err: %s", err)
+		m := make(map[string]any, len(src))
+		maps.Copy(m, src)
+		return m
+	}
+	if m, ok := copied.(map[string]any); ok {
+		if m == nil {
+			return make(map[string]any)
+		}
+		return m
+	}
+	printf("warning: unable to convert globals map copy to map type")
 	m := make(map[string]any, len(src))
 	maps.Copy(m, src)
 	return m
